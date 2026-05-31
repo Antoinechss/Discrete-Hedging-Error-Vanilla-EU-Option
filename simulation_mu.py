@@ -1,4 +1,5 @@
 # Monte Carlo evaluation of hedging error in discrete vs continuous portfolio updating
+# Impact of drift parameter mu
 
 
 
@@ -14,13 +15,13 @@ import matplotlib.pyplot as plt
 
 SIGMA = 0.2
 K = 100
-T = 1 
+T = 1
 R = 0.05
 S0 = 100
 M = 10000 # nombre de trajectoires MC
-N_values = [4, 12, 52, 252]
-#N_values = np.arange(4, 252, 10)
-mu = 0.05
+N_values = np.linspace(4, 256, 20).astype(int)
+MU_values = [-0.05, 0.05, 0.15, 0.20]
+N_plot = 52
 
 
 
@@ -35,17 +36,17 @@ def init_call_price(S_0=S0, K=K, r=R, sigma=SIGMA, T=T):
 
 def delta(tau, S, K=K, sigma=SIGMA, T=T, r=R):
     """
-    Calcule la valeur du delta pour un time to maturity tau 
+    Calcule la valeur du delta pour un time to maturity tau
     et une valeur du sous jacent S donnnés
     """
-    if tau <=0: # Delta à maturité 
+    if tau <= 0: # Delta à maturité
         return 1.0 if S > K else 0.0
-    
+
     d1 = (np.log(S/K) + (r+0.5*sigma**2)*tau) / (sigma*np.sqrt(tau))
     return norm.cdf(d1)
 
 
-def sim_S(N, mu=mu, S_0=S0, sigma=SIGMA, T=T): 
+def sim_S(N, mu, S_0=S0, sigma=SIGMA, T=T):
     """Simule une trajectoire aléatoire de l'actif sous-jacent"""
     dt = T/N
     S = np.zeros(N+1)
@@ -70,7 +71,7 @@ def sim_portefeuille(S, K=K, r=R, sigma=SIGMA, T=T):
     return V
 
 
-def erreur_couverture(N, mu=mu, S_0=S0, K=K, r=R, sigma=SIGMA, T=T):
+def erreur_couverture(N, mu, S_0=S0, K=K, r=R, sigma=SIGMA, T=T):
     """Calcule l'erreur de couverture pour une trajectoire de simulation"""
     S = sim_S(N, mu, S_0, sigma, T)
     V = sim_portefeuille(S, K, r, sigma, T)
@@ -82,13 +83,13 @@ def erreur_couverture(N, mu=mu, S_0=S0, K=K, r=R, sigma=SIGMA, T=T):
 
 # ------ Boucle Monte-Carlo ------
 
-def mc_erreur_couverture(N, mu=mu, S_0=S0, r=R, K=K, T=T, sigma=SIGMA, M=M):
+def mc_erreur_couverture(N, mu, S_0=S0, r=R, K=K, T=T, sigma=SIGMA, M=M):
     errors = np.zeros(M)
     V_sims = np.zeros(M)
     S_sims = np.zeros(M)
     payoffs = np.zeros(M)
 
-    for m in range(M): 
+    for m in range(M):
         error, S, V, payoff = erreur_couverture(N, mu, S_0, K, r, sigma, T)
 
         errors[m] = error
@@ -103,90 +104,61 @@ def mc_erreur_couverture(N, mu=mu, S_0=S0, r=R, K=K, T=T, sigma=SIGMA, M=M):
 
 # ------ SIMULATION -------
 
-if __name__ == "__main__": 
+if __name__ == "__main__":
 
     simulations = {}
 
-    for N in N_values: 
-        sim_stats = mc_erreur_couverture(N, mu=mu, S_0=S0, r=R, K=K, T=T, sigma=SIGMA, M=M)
-        simulations[N] = {'N': N,
-                          'mse': sim_stats[0],
-                          'errors': sim_stats[1],
-                          'VT': sim_stats[2], 
-                          'ST': sim_stats[3], 
-                          'payoffs': sim_stats[4]}
-        print(f"N={N}, MSE={sim_stats[0]:.6f}")
+    for mu in MU_values:
+        simulations[mu] = {}
+        for N in N_values:
+            sim_stats = mc_erreur_couverture(N, mu=mu, S_0=S0, r=R, K=K, T=T, sigma=SIGMA, M=M)
+            simulations[mu][N] = {'N': N,
+                                  'mse': sim_stats[0],
+                                  'errors': sim_stats[1],
+                                  'VT': sim_stats[2],
+                                  'ST': sim_stats[3],
+                                  'payoffs': sim_stats[4]}
+            print(f"mu={mu}, N={N}, MSE={sim_stats[0]:.6f}")
 
-    # ----- Graphiques 
+    # ----- Graphiques
 
     # Erreur de couverture en fonction du nombre de rebalancements
 
-    N_list = []
-    mse_list = []
-
-    for N in N_values:
-        N_list.append(N)
-        mse_list.append(simulations[N]["mse"])
-
     plt.figure(figsize=(8,5))
-    plt.plot(N_list, mse_list, marker="o")
+
+    for mu in MU_values:
+        N_list = list(N_values)
+        mse_list = [simulations[mu][N]["mse"] for N in N_values]
+        plt.plot(N_list, mse_list, marker="o", label=rf"$\mu={mu}$")
 
     plt.xlabel("Number of rebalancings N")
     plt.ylabel("Mean squared hedging error")
-    plt.title("Hedging error vs rebalancing frequency")
-
+    plt.title(r"Hedging error vs rebalancing frequency — varying $\mu$")
+    plt.legend()
     plt.grid(True)
-    plt.savefig("plots/hedging_error_vs_N.png", dpi=300, bbox_inches="tight")
+    plt.savefig("plots/mu_dependence/hedging_error_vs_N_mu.png", dpi=300, bbox_inches="tight")
 
 
     # Scatterplot (S, V)
 
-    N_plot = N_values[len(N_values) // 2]  # pick a middle value that's guaranteed to exist
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    axes = axes.flatten()
 
-    ST = simulations[N_plot]["ST"]
-    VT = simulations[N_plot]["VT"]
+    for i, mu in enumerate(MU_values):
+        ST = simulations[mu][N_plot]["ST"]
+        VT = simulations[mu][N_plot]["VT"]
 
-    x = np.linspace(min(ST), max(ST), 500)
-    payoff_curve = np.maximum(x - K, 0)
+        x = np.linspace(min(ST), max(ST), 500)
+        payoff_curve = np.maximum(x - K, 0)
 
-    plt.figure(figsize=(8,5))
+        axes[i].scatter(ST, VT, s=8, alpha=0.5, label="Portfolio terminal value")
+        axes[i].plot(x, payoff_curve, color="red", linewidth=2, label="Call payoff")
+        axes[i].set_xlabel(r"$S_T$")
+        axes[i].set_ylabel(r"$V_T^N$")
+        axes[i].set_title(rf"$\mu={mu}$, N={N_plot}")
+        axes[i].legend()
+        axes[i].grid(True)
 
-    plt.scatter(ST, VT, s=8, alpha=0.5, label="Portfolio terminal value")
-    plt.plot(x, payoff_curve, color="red", linewidth=2, label="Call payoff")
-
-    plt.xlabel(r"$S_T$")
-    plt.ylabel(r"$V_T^N$")
-    plt.title(f"Terminal portfolio value vs payoff (N={N_plot})")
-
-    plt.legend()
-    plt.grid(True)
-
-    plt.savefig("plots/ST_vs_VT.png", dpi=300, bbox_inches="tight")
-
-
-    # Histogramme des erreurs
-
-    N_plot = N_values[len(N_values) // 2]
-
-    errors = simulations[N_plot]["errors"]
-
-    plt.figure(figsize=(8,5))
-
-    plt.hist(errors, bins=60)
-
-    plt.xlabel(r"$V_T^N - f(S_T)$")
-    plt.ylabel("Frequency")
-    plt.title(f"Distribution of hedging errors (N={N_plot})")
-
-    plt.grid(True)
-
-    plt.savefig("plots/error_histogram.png", dpi=300, bbox_inches="tight")
-
-
-
-
-
-
-
-
- 
+    fig.suptitle(r"Terminal portfolio value vs payoff — varying $\mu$", fontsize=14)
+    plt.tight_layout()
+    plt.savefig("plots/mu_dependence/ST_vs_VT_mu.png", dpi=300, bbox_inches="tight")
